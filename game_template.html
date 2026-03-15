@@ -172,13 +172,60 @@
             font-weight: bold;
         }
 
+        /* ---- D-PAD BUTTONS ---- */
+        #dpad {
+            position: fixed;
+            bottom: 18px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: none;
+            z-index: 15;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .dpad-row {
+            display: flex;
+            justify-content: center;
+            gap: 4px;
+            margin: 4px 0;
+        }
+
+        .dpad-btn {
+            width: 64px;
+            height: 64px;
+            background: rgba(20, 60, 10, 0.82);
+            border: 2px solid #6fa832;
+            border-radius: 12px;
+            color: #d4e874;
+            font-size: 1.6rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            transition: background 0.1s;
+        }
+
+        .dpad-btn:active {
+            background: rgba(80, 160, 30, 0.9);
+        }
+
+        /* Spacer cell */
+        .dpad-space {
+            width: 64px;
+            height: 64px;
+        }
+
         /* ---- BOOST BAR ---- */
         #boost-bar-wrap {
             position: fixed;
-            bottom: 14px;
+            bottom: 220px;
             left: 50%;
             transform: translateX(-50%);
-            width: 160px;
+            width: 140px;
             background: rgba(0, 0, 0, 0.5);
             border: 2px solid #9a7010;
             border-radius: 8px;
@@ -239,6 +286,25 @@
     <!-- BOOST BAR -->
     <div id="boost-bar-wrap">
         <div id="boost-bar"></div>
+    </div>
+
+    <!-- D-PAD -->
+    <div id="dpad">
+        <div class="dpad-row">
+            <div class="dpad-space"></div>
+            <button class="dpad-btn" id="btn-up">▲</button>
+            <div class="dpad-space"></div>
+        </div>
+        <div class="dpad-row">
+            <button class="dpad-btn" id="btn-left">◀</button>
+            <div class="dpad-space"></div>
+            <button class="dpad-btn" id="btn-right">▶</button>
+        </div>
+        <div class="dpad-row">
+            <div class="dpad-space"></div>
+            <button class="dpad-btn" id="btn-down">▼</button>
+            <div class="dpad-space"></div>
+        </div>
     </div>
 
     <!-- CANVAS -->
@@ -367,9 +433,14 @@
                 }
 
                 function setCameraPos() {
-                    // Look at arena from above-behind
-                    camera.position.set(0, HALF * 1.3, HALF * 1.15);
+                    // True top-down overhead: high Y, slight tilt for depth perception
+                    const aspect = window.innerWidth / window.innerHeight;
+                    // On portrait (mobile), camera needs to be higher to see full arena
+                    const heightMult = aspect < 1 ? 2.2 : 1.6;
+                    camera.position.set(0, HALF * heightMult, HALF * 0.5);
                     camera.lookAt(0, 0, 0);
+                    camera.fov = aspect < 1 ? 70 : 55;
+                    camera.updateProjectionMatrix();
                 }
 
                 // ===================== ARENA =====================
@@ -650,6 +721,8 @@
 
                     document.getElementById('boost-bar-wrap').style.display = 'none';
                     document.getElementById('boost-hud').style.display = 'none';
+                    // Always show dpad during gameplay
+                    document.getElementById('dpad').style.display = 'block';
                     updateHUD();
 
                     if (rafId) cancelAnimationFrame(rafId);
@@ -765,37 +838,34 @@
                         it.position.y = CELL * 0.38 + Math.sin(itemRotTimer * 3 + it.userData.gx) * 0.12;
                     });
 
-                    // Camera gentle follow (track snake head)
-                    if (snake.length > 0) {
-                        const hw = cellToWorld(snake[0].x, snake[0].z);
-                        const tx = hw.x * 0.25;
-                        const tz = hw.z * 0.25;
-                        camera.position.x += (tx - camera.position.x) * Math.min(dt * 2, 1);
-                        camera.position.z = (HALF * 1.15) + tz * 0.3;
-                        camera.lookAt(tx, 0, tz);
-                    }
+                    // Camera: fixed overhead, no follow (to see whole arena at all times)
+                    // Only recenter gently on the arena center
+                    camera.lookAt(0, 0, 0);
 
                     renderer.render(scene, camera);
                 }
 
                 // ===================== INPUT =====================
                 let touchSX = 0, touchSY = 0;
-                const SWIPE = 30;
+                const SWIPE = 22;
 
                 function setDir(dx, dz) {
+                    if (!running) return;
                     // Disallow 180s
                     if (dx === -dir.x && dz === -dir.z) return;
                     nextDir = { x: dx, z: dz };
                 }
 
                 function setupInput() {
-                    const cv = document.getElementById('game-canvas');
-                    cv.addEventListener('touchstart', e => {
-                        e.preventDefault();
-                        touchSX = e.touches[0].clientX; touchSY = e.touches[0].clientY;
-                    }, { passive: false });
-                    cv.addEventListener('touchend', e => {
-                        e.preventDefault();
+                    // Touch swipe on whole document (works even if canvas is partially hidden)
+                    document.addEventListener('touchstart', e => {
+                        // Ignore touches on dpad buttons
+                        if (e.target.classList.contains('dpad-btn')) return;
+                        touchSX = e.touches[0].clientX;
+                        touchSY = e.touches[0].clientY;
+                    }, { passive: true });
+                    document.addEventListener('touchend', e => {
+                        if (e.target.classList.contains('dpad-btn')) return;
                         const dx = e.changedTouches[0].clientX - touchSX;
                         const dy = e.changedTouches[0].clientY - touchSY;
                         if (Math.abs(dx) < SWIPE && Math.abs(dy) < SWIPE) return;
@@ -804,7 +874,27 @@
                         } else {
                             setDir(0, dy > 0 ? 1 : -1);
                         }
-                    }, { passive: false });
+                    }, { passive: true });
+
+                    // D-Pad buttons
+                    const btnMap = {
+                        'btn-up': [0, -1],
+                        'btn-down': [0, 1],
+                        'btn-left': [-1, 0],
+                        'btn-right': [1, 0]
+                    };
+                    Object.entries(btnMap).forEach(([id, [dx, dz]]) => {
+                        const el = document.getElementById(id);
+                        if (!el) return;
+                        // touchstart for instant response, and click as fallback
+                        el.addEventListener('touchstart', e => { e.preventDefault(); setDir(dx, dz); }, { passive: false });
+                        el.addEventListener('click', () => setDir(dx, dz));
+                    });
+
+                    // Show D-pad on touch devices (detect at load time)
+                    if (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) {
+                        document.getElementById('dpad').style.display = 'block';
+                    }
 
                     document.addEventListener('keydown', e => {
                         if (e.key === 'ArrowLeft') setDir(-1, 0);
@@ -817,6 +907,7 @@
                         camera.aspect = innerWidth / innerHeight;
                         camera.updateProjectionMatrix();
                         renderer.setSize(innerWidth, innerHeight);
+                        setCameraPos();
                     });
                 }
 
